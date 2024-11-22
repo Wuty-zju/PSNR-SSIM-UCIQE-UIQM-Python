@@ -11,6 +11,7 @@ import os
 import csv
 from skimage import io, color, filters
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+from tqdm import tqdm
 
 
 class PSNR_SSIM_UIQM_UCIQE:
@@ -18,15 +19,15 @@ class PSNR_SSIM_UIQM_UCIQE:
     图像质量评估类，提供计算PSNR、SSIM、UIQM和UCIQE的功能。
     """
 
-    def __init__(self, result_path, reference_path=None):
+    def __init__(self, image_path, reference_path=None):
         """
         初始化方法。
 
         参数:
-            result_path (str): 已处理图像的文件夹路径。
+            image_path (str): 已处理图像的文件夹路径。
             reference_path (str, 可选): 原始参考图像的文件夹路径。
         """
-        self.result_path = result_path
+        self.image_path = image_path
         self.reference_path = reference_path
         self.results = []
 
@@ -82,7 +83,7 @@ class PSNR_SSIM_UIQM_UCIQE:
 
             参数:
                 img (numpy.ndarray): 输入图像。
-                p1 (float): UICM的系数，默认值为0.0282。
+                p1 (float): UICM的系数，��认值为0.0282。
                 p2 (float): UISM的系数，默认值为0.2953。
                 p3 (float): UIConM的系数，默认值为3.5753。
 
@@ -327,24 +328,27 @@ class PSNR_SSIM_UIQM_UCIQE:
 
         return self._plipmult(w, s, gamma)
 
-    def process_images(self, metrics=['psnr', 'ssim', 'uiqm', 'uciqe'], csv_path="metrics.csv"):
+    def process_images(self, metrics=['psnr', 'ssim', 'uiqm', 'uciqe'], csv_path="metrics.csv", 
+                       uiqm_coeffs=(0.0282, 0.2953, 3.5753), uciqe_coeffs=(0.4680, 0.2745, 0.2576)):
         """
         处理图像并计算指定的指标。
 
         参数:
             metrics (list of str): 要计算的指标列表，默认为所有指标。
             csv_path (str): 保存CSV的相对路径和文件名。
+            uiqm_coeffs (tuple): UIQM的系数，默认值为(0.0282, 0.2953, 3.5753)。
+            uciqe_coeffs (tuple): UCIQE的系数，默认值为(0.4680, 0.2745, 0.2576)。
 
         返回:
             None
         """
-        result_files = [f for f in os.listdir(self.result_path)]
+        result_files = [f for f in os.listdir(self.image_path)]
         N = len(result_files)
         sum_metrics = {metric: 0.0 for metric in metrics}
 
-        for img_file in result_files:
+        for img_file in tqdm(result_files, desc="Processing images"):
             # 已处理图像
-            corrected_path = os.path.join(self.result_path, img_file)
+            corrected_path = os.path.join(self.image_path, img_file)
             corrected = io.imread(corrected_path)
 
             # 添加 image_path 列，值为相对于保存的 CSV 文件的路径
@@ -378,16 +382,17 @@ class PSNR_SSIM_UIQM_UCIQE:
 
             # 计算非参考指标
             if 'uiqm' in metrics:
-                uiqm_value = self.compute_uiqm(corrected, m1=0.0282, m2=0.2953, m3=3.5753)
+                uiqm_value = self.compute_uiqm(corrected, m1=uiqm_coeffs[0], m2=uiqm_coeffs[1], m3=uiqm_coeffs[2])
                 result['uiqm'] = uiqm_value
                 sum_metrics['uiqm'] += uiqm_value
             if 'uciqe' in metrics:
-                uciqe_value = self.compute_uciqe(corrected, c1=0.4680, c2=0.2745, c3=0.2576)
+                uciqe_value = self.compute_uciqe(corrected, c1=uciqe_coeffs[0], c2=uciqe_coeffs[1], c3=uciqe_coeffs[2])
                 result['uciqe'] = uciqe_value
                 sum_metrics['uciqe'] += uciqe_value
 
             # 保存结果
             self.results.append(result)
+            
         """
         # 计算平均值
         avg_metrics = {metric: sum_metrics[metric] / N for metric in metrics if N > 0}
@@ -424,14 +429,19 @@ class PSNR_SSIM_UIQM_UCIQE:
 
 if __name__ == '__main__':
     # 定义结果图像和参考图像的文件夹路径
-    result_path = 'enhanced'       # 替换为实际的已处理图像文件夹路径
-    reference_path = 'origin'      # 替换为实际的参考图像文件夹路径
+    image_path = 'enhanced'       # 实际的已处理图像文件夹路径
+    reference_path = 'origin'      # 实际的参考图像文件夹路径
 
     # 创建图像质量评估对象
-    iqm = PSNR_SSIM_UIQM_UCIQE(result_path, reference_path)
+    psuu = PSNR_SSIM_UIQM_UCIQE(image_path, reference_path)
 
-    # 指定要计算的指标，可以根据需要调整
+    # 指定要计算的指标
     metrics_to_compute = ['psnr', 'ssim', 'uiqm', 'uciqe']
 
+    # 指定UIQM和UCIQE的系数
+    uiqm_coeffs = (0.0282, 0.2953, 3.5753)
+    uciqe_coeffs = (0.4680, 0.2745, 0.2576)
+
     # 处理图像并计算指标
-    iqm.process_images(metrics=metrics_to_compute, csv_path="PSNR_SSIM_UIQM_UCIQE.csv")
+    psuu.process_images(metrics=metrics_to_compute, csv_path="PSNR_SSIM_UIQM_UCIQE.csv", 
+                       uiqm_coeffs=uiqm_coeffs, uciqe_coeffs=uciqe_coeffs)
