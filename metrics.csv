@@ -1,0 +1,3 @@
+image_name,psnr,ssim,uiqm,uciqe
+biograd-A_00001_right-2.jpg,,,2.435769,18.301613
+biograd-A_00001_right.jpg,inf,1.0,3.2032666,22.343195
