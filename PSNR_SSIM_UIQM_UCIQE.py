@@ -76,120 +76,125 @@ class PSNR_SSIM_UIQM_UCIQE:
         ssim_value = structural_similarity(img1, img2, channel_axis=-1, data_range=1.0, win_size=win_size)
         return ssim_value
 
-    def compute_uiqm(self, img):
-        """
-        计算单张图像的UIQM。
+    def compute_uiqm(self, img, m1=0.0282, m2=0.2953, m3=3.5753):
+            """
+            计算单张图像的UIQM。
 
-        参数:
-            img (numpy.ndarray): 输入图像。
+            参数:
+                img (numpy.ndarray): 输入图像。
+                p1 (float): UICM的系数，默认值为0.0282。
+                p2 (float): UISM的系数，默认值为0.2953。
+                p3 (float): UIConM的系数，默认值为3.5753。
 
-        返回:
-            float: 计算得到的UIQM值。
-        """
-        # 将图像转换为浮点型，范围[0, 1]
-        rgb = img.astype(np.float32) / 255.0
+            返回:
+                float: 计算得到的UIQM值。
+            """
+            # 将图像转换为浮点型，范围[0, 1]
+            rgb = img.astype(np.float32) / 255.0
 
-        # 参数设置
-        p1, p2, p3 = 0.0282, 0.2953, 3.5753
+            # 计算UICM
+            uicm = self._calculate_uicm(rgb, c1=-0.0268, c2=0.1586)
 
-        # 计算UICM
-        uicm = self._calculate_uicm(rgb)
+            # 计算UISM
+            uism = self._calculate_uism(rgb, cr=0.299, cg=0.587, cb=0.114)
 
-        # 计算UISM
-        uism = self._calculate_uism(rgb)
+            # 计算UIConM
+            gray = color.rgb2gray(rgb)
+            uiconm = self._calculate_uiconm(gray)
 
-        # 计算UIConM
-        gray = color.rgb2gray(rgb)
-        uiconm = self._calculate_uiconm(gray)
+            # 组合计算UIQM
+            uiqm_value = m1 * uicm + m2 * uism + m3 * uiconm
+            return uiqm_value
 
-        # 组合计算UIQM
-        uiqm_value = p1 * uicm + p2 * uism + p3 * uiconm
-        return uiqm_value
+    def compute_uciqe(self, img, c1=0.4680, c2=0.2745, c3=0.2576):
+            """
+            计算单张图像的UCIQE。
 
-    def compute_uciqe(self, img):
-        """
-        计算单张图像的UCIQE。
+            参数:
+                img (numpy.ndarray): 输入图像。
+                c1 (float): 第一个系数，默认值为0.4680。
+                c2 (float): 第二个系数，默认值为0.2745。
+                c3 (float): 第三个系数，默认值为0.2576。
 
-        参数:
-            img (numpy.ndarray): 输入图像。
+            返回:
+                float: 计算得到的UCIQE值。
+            """
+            # 将图像转换为浮点型，范围[0, 1]
+            rgb = img.astype(np.float32) / 255.0
+            lab = color.rgb2lab(rgb)
 
-        返回:
-            float: 计算得到的UCIQE值。
-        """
-        # 将图像转换为浮点型，范围[0, 1]
-        rgb = img.astype(np.float32) / 255.0
-        lab = color.rgb2lab(rgb)
+            # 提取L、a、b分量
+            L = lab[:, :, 0]
+            a = lab[:, :, 1]
+            b = lab[:, :, 2]
 
-        # 参数设置
-        c1, c2, c3 = 0.4680, 0.2745, 0.2576
+            # 计算色度
+            chroma = np.sqrt(a ** 2 + b ** 2)
+            sc = np.std(chroma)
 
-        # 提取L、a、b分量
-        L = lab[:, :, 0]
-        a = lab[:, :, 1]
-        b = lab[:, :, 2]
+            # 计算亮度对比度
+            conl = np.percentile(L, 99) - np.percentile(L, 1)
 
-        # 计算色度
-        chroma = np.sqrt(a ** 2 + b ** 2)
-        sc = np.std(chroma)
+            # 计算平均饱和度
+            saturation = chroma / (L + 1e-8)  # 防止除零
+            us = np.mean(saturation)
 
-        # 计算亮度对比度
-        conl = np.percentile(L, 99) - np.percentile(L, 1)
+            # 组合计算UCIQE
+            uciqe_value = c1 * sc + c2 * conl + c3 * us
+            return uciqe_value
 
-        # 计算平均饱和度
-        saturation = chroma / (L + 1e-8)  # 防止除零
-        us = np.mean(saturation)
+    def _calculate_uicm(self, rgb, c1=-0.0268, c2=0.1586):
+            """
+            内部方法，计算UICM。
 
-        # 组合计算UCIQE
-        uciqe_value = c1 * sc + c2 * conl + c3 * us
-        return uciqe_value
+            参数:
+                rgb (numpy.ndarray): 输入RGB图像。
+                c1 (float): 第一个系数，默认值为-0.0268。
+                c2 (float): 第二个系数，默认值为0.1586。
 
-    def _calculate_uicm(self, rgb):
-        """
-        内部方法，计算UICM。
+            返回:
+                float: 计算得到的UICM值。
+            """
+            # 计算RG和YB
+            rg = rgb[:, :, 0] - rgb[:, :, 1]
+            yb = (rgb[:, :, 0] + rgb[:, :, 1]) / 2 - rgb[:, :, 2]
 
-        参数:
-            rgb (numpy.ndarray): 输入RGB图像。
+            # 计算均值和方差
+            urg = np.mean(rg)
+            s2rg = np.var(rg)
+            uyb = np.mean(yb)
+            s2yb = np.var(yb)
 
-        返回:
-            float: 计算得到的UICM值。
-        """
-        # 计算RG和YB
-        rg = rgb[:, :, 0] - rgb[:, :, 1]
-        yb = (rgb[:, :, 0] + rgb[:, :, 1]) / 2 - rgb[:, :, 2]
+            # 计算UICM
+            uicm_value = c1 * np.sqrt(urg ** 2 + uyb ** 2) + c2 * np.sqrt(s2rg + s2yb)
+            return uicm_value
 
-        # 计算均值和方差
-        urg = np.mean(rg)
-        s2rg = np.var(rg)
-        uyb = np.mean(yb)
-        s2yb = np.var(yb)
+    def _calculate_uism(self, rgb, cr=0.299, cg=0.587, cb=0.114):
+            """
+            内部方法，计算UISM。
 
-        # 计算UICM
-        uicm_value = -0.0268 * np.sqrt(urg ** 2 + uyb ** 2) + 0.1586 * np.sqrt(s2rg + s2yb)
-        return uicm_value
+            参数:
+                rgb (numpy.ndarray): 输入RGB图像。
+                cr (float): 红色通道的系数，默认值为0.299。
+                cg (float): 绿色通道的系数，默认值为0.587。
+                cb (float): 蓝色通道的系数，默认值为0.114。
 
-    def _calculate_uism(self, rgb):
-        """
-        内部方法，计算UISM。
+            返回:
+                float: 计算得到的UISM值。
+            """
+            # 计算每个通道的Sobel梯度
+            R_sobel = filters.sobel(rgb[:, :, 0])
+            G_sobel = filters.sobel(rgb[:, :, 1])
+            B_sobel = filters.sobel(rgb[:, :, 2])
 
-        参数:
-            rgb (numpy.ndarray): 输入RGB图像。
+            # 计算EME
+            R_eme = self._eme(R_sobel)
+            G_eme = self._eme(G_sobel)
+            B_eme = self._eme(B_sobel)
 
-        返回:
-            float: 计算得到的UISM值。
-        """
-        # 计算每个通道的Sobel梯度
-        R_sobel = filters.sobel(rgb[:, :, 0])
-        G_sobel = filters.sobel(rgb[:, :, 1])
-        B_sobel = filters.sobel(rgb[:, :, 2])
-
-        # 计算EME
-        R_eme = self._eme(R_sobel)
-        G_eme = self._eme(G_sobel)
-        B_eme = self._eme(B_sobel)
-
-        # 组合计算UISM
-        uism_value = 0.299 * R_eme + 0.587 * G_eme + 0.114 * B_eme
-        return uism_value
+            # 组合计算UISM
+            uism_value = cr * R_eme + cg * G_eme + cb * B_eme
+            return uism_value
 
     def _calculate_uiconm(self, gray):
         """
@@ -373,11 +378,11 @@ class PSNR_SSIM_UIQM_UCIQE:
 
             # 计算非参考指标
             if 'uiqm' in metrics:
-                uiqm_value = self.compute_uiqm(corrected)
+                uiqm_value = self.compute_uiqm(corrected, m1=0.0282, m2=0.2953, m3=3.5753)
                 result['uiqm'] = uiqm_value
                 sum_metrics['uiqm'] += uiqm_value
             if 'uciqe' in metrics:
-                uciqe_value = self.compute_uciqe(corrected)
+                uciqe_value = self.compute_uciqe(corrected, c1=0.4680, c2=0.2745, c3=0.2576)
                 result['uciqe'] = uciqe_value
                 sum_metrics['uciqe'] += uciqe_value
 
