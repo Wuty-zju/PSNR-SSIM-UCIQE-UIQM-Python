@@ -1,17 +1,11 @@
-"""
-用于水下图像质量评估的指标。
-
-描述：
-该模块定义了一个用于计算图像质量指标的类，包括PSNR、SSIM、UIQM和UCIQE。
-可以选择性地计算这些指标，支持批量处理图像并将结果保存到CSV文件中。
-"""
-
 import numpy as np
 import os
 import csv
 from skimage import io, color, filters
 from skimage.metrics import structural_similarity
+from skimage.transform import resize
 from tqdm import tqdm
+import time
 
 
 class PSNR_SSIM_UIQM_UCIQE:
@@ -66,7 +60,7 @@ class PSNR_SSIM_UIQM_UCIQE:
         img1 = img1.astype(np.float32) / 255.0
         img2 = img2.astype(np.float32) / 255.0
 
-        # 确定win_size
+        # 确定窗口大小
         win_size = min(img1.shape[0], img1.shape[1], 7)
         if win_size % 2 == 0:
             win_size -= 1
@@ -78,124 +72,147 @@ class PSNR_SSIM_UIQM_UCIQE:
         return ssim_value
 
     def compute_uiqm(self, img, m1=0.0282, m2=0.2953, m3=3.5753):
-            """
-            计算单张图像的UIQM。
+        """
+        计算单张图像的UIQM。
 
-            参数:
-                img (numpy.ndarray): 输入图像。
-                p1 (float): UICM的系数，默认值为0.0282。
-                p2 (float): UISM的系数，默认值为0.2953。
-                p3 (float): UIConM的系数，默认值为3.5753。
+        参数:
+            img (numpy.ndarray): 输入图像。
+            m1 (float): UICM的系数，默认值为0.0282。
+            m2 (float): UISM的系数，默认值为0.2953。
+            m3 (float): UIConM的系数，默认值为3.5753。
 
-            返回:
-                float: 计算得到的UIQM值。
-            """
-            # 将图像转换为浮点型，范围[0, 1]
-            rgb = img.astype(np.float32) / 255.0
+        返回:
+            float: 计算得到的UIQM值。
+        """
+        # 将图像转换为浮点型，范围[0, 1]
+        rgb = img.astype(np.float32) / 255.0
 
-            # 计算UICM
-            uicm = self._calculate_uicm(rgb, c1=-0.0268, c2=0.1586)
+        # 计算UICM
+        uicm = self._calculate_uicm(rgb)
 
-            # 计算UISM
-            uism = self._calculate_uism(rgb, cr=0.299, cg=0.587, cb=0.114)
+        # 计算UISM
+        uism = self._calculate_uism(rgb)
 
-            # 计算UIConM
-            gray = color.rgb2gray(rgb)
-            uiconm = self._calculate_uiconm(gray)
+        # 计算UIConM
+        gray = color.rgb2gray(rgb)
+        uiconm = self._calculate_uiconm(gray)
 
-            # 组合计算UIQM
-            uiqm_value = m1 * uicm + m2 * uism + m3 * uiconm
-            return uiqm_value
+        # 组合计算UIQM
+        uiqm_value = m1 * uicm + m2 * uism + m3 * uiconm
+        return uiqm_value
 
     def compute_uciqe(self, img, c1=0.4680, c2=0.2745, c3=0.2576):
-            """
-            计算单张图像的UCIQE。
+        """
+        计算单张图像的UCIQE。
 
-            参数:
-                img (numpy.ndarray): 输入图像。
-                c1 (float): 第一个系数，默认值为0.4680。
-                c2 (float): 第二个系数，默认值为0.2745。
-                c3 (float): 第三个系数，默认值为0.2576。
+        参数:
+            img (numpy.ndarray): 输入图像。
+            c1 (float): 第一个系数，默认值为0.4680。
+            c2 (float): 第二个系数，默认值为0.2745。
+            c3 (float): 第三个系数，默认值为0.2576。
 
-            返回:
-                float: 计算得到的UCIQE值。
-            """
-            # 将图像转换为浮点型，范围[0, 1]
-            rgb = img.astype(np.float32) / 255.0
-            lab = color.rgb2lab(rgb)
+        返回:
+            float: 计算得到的UCIQE值。
+        """
+        # 将图像转换为浮点型，范围[0, 1]
+        rgb = img.astype(np.float32) / 255.0
+        lab = color.rgb2lab(rgb)
 
-            # 提取L、a、b分量
-            L = lab[:, :, 0]
-            a = lab[:, :, 1]
-            b = lab[:, :, 2]
+        # 提取L、a、b分量，并归一化
+        L = lab[:, :, 0] / 100.0  # L* 范围 [0, 1]
+        a = lab[:, :, 1] / 110.0  # a* 近似范围 [-1, 1]
+        b = lab[:, :, 2] / 110.0  # b* 近似范围 [-1, 1]
 
-            # 计算色度
-            chroma = np.sqrt(a ** 2 + b ** 2)
-            sc = np.std(chroma)
+        # 计算色度C = sqrt(a^2 + b^2)
+        chroma = np.sqrt(a ** 2 + b ** 2)
 
-            # 计算亮度对比度
-            conl = np.percentile(L, 99) - np.percentile(L, 1)
+        # 计算σ_c（色度的标准差）
+        sigma_c = np.std(chroma)
 
-            # 计算平均饱和度
-            saturation = chroma / (L + 1e-8)  # 防止除零
-            us = np.mean(saturation)
+        # 计算亮度对比度 con_l = 第99百分位 - 第1百分位
+        con_l = np.percentile(L, 99) - np.percentile(L, 1)
 
-            # 组合计算UCIQE
-            uciqe_value = c1 * sc + c2 * conl + c3 * us
-            return uciqe_value
+        # 计算饱和度 S = arccos(L / sqrt(L^2 + chroma^2))
+        epsilon = 1e-8  # 防止除零
+        denominator = np.sqrt(L ** 2 + chroma ** 2) + epsilon
+        # 确保除法结果在 [-1, 1] 范围内
+        cos_theta = np.clip(L / denominator, -1, 1)
+        saturation = np.arccos(cos_theta)
 
-    def _calculate_uicm(self, rgb, c1=-0.0268, c2=0.1586):
-            """
-            内部方法，计算UICM。
+        # 计算饱和度的平均值
+        mean_saturation = np.mean(saturation)
 
-            参数:
-                rgb (numpy.ndarray): 输入RGB图像。
-                c1 (float): 第一个系数，默认值为-0.0268。
-                c2 (float): 第二个系数，默认值为0.1586。
+        # 组合计算UCIQE
+        uciqe_value = c1 * sigma_c + c2 * con_l + c3 * mean_saturation
+        return uciqe_value
 
-            返回:
-                float: 计算得到的UICM值。
-            """
-            # 计算RG和YB
-            rg = rgb[:, :, 0] - rgb[:, :, 1]
-            yb = (rgb[:, :, 0] + rgb[:, :, 1]) / 2 - rgb[:, :, 2]
+    def _calculate_uicm(self, rgb):
+        """
+        内部方法，计算UICM。
 
-            # 计算均值和方差
-            urg = np.mean(rg)
-            s2rg = np.var(rg)
-            uyb = np.mean(yb)
-            s2yb = np.var(yb)
+        参数:
+            rgb (numpy.ndarray): 输入RGB图像。
 
-            # 计算UICM
-            uicm_value = c1 * np.sqrt(urg ** 2 + uyb ** 2) + c2 * np.sqrt(s2rg + s2yb)
-            return uicm_value
+        返回:
+            float: 计算得到的UICM值。
+        """
+        # 提取R、G、B通道
+        R = rgb[:, :, 0]
+        G = rgb[:, :, 1]
+        B = rgb[:, :, 2]
 
-    def _calculate_uism(self, rgb, cr=0.299, cg=0.587, cb=0.114):
-            """
-            内部方法，计算UISM。
+        # 计算RG和YB通道
+        RG = R - G
+        YB = 0.5 * (R + G) - B
 
-            参数:
-                rgb (numpy.ndarray): 输入RGB图像。
-                cr (float): 红色通道的系数，默认值为0.299。
-                cg (float): 绿色通道的系数，默认值为0.587。
-                cb (float): 蓝色通道的系数，默认值为0.114。
+        # 计算经过α裁剪的均值和标准差
+        alpha = 0.1  # α裁剪比例，可根据需要调整
+        mu_RG = self._asymmetric_trimmed_mean(RG, alpha, alpha)
+        mu_YB = self._asymmetric_trimmed_mean(YB, alpha, alpha)
+        sigma_RG = self._asymmetric_trimmed_std(RG, alpha, alpha)
+        sigma_YB = self._asymmetric_trimmed_std(YB, alpha, alpha)
 
-            返回:
-                float: 计算得到的UISM值。
-            """
-            # 计算每个通道的Sobel梯度
-            R_sobel = filters.sobel(rgb[:, :, 0])
-            G_sobel = filters.sobel(rgb[:, :, 1])
-            B_sobel = filters.sobel(rgb[:, :, 2])
+        # 计算UICM
+        c1 = -0.0268
+        c2 = 0.1586
+        uicm_value = c1 * np.sqrt(mu_RG ** 2 + mu_YB ** 2) + c2 * np.sqrt(sigma_RG ** 2 + sigma_YB ** 2)
+        return uicm_value
 
-            # 计算EME
-            R_eme = self._eme(R_sobel)
-            G_eme = self._eme(G_sobel)
-            B_eme = self._eme(B_sobel)
+    def _calculate_uism(self, rgb):
+        """
+        内部方法，计算UISM。
 
-            # 组合计算UISM
-            uism_value = cr * R_eme + cg * G_eme + cb * B_eme
-            return uism_value
+        参数:
+            rgb (numpy.ndarray): 输入RGB图像。
+
+        返回:
+            float: 计算得到的UISM值。
+        """
+        # 对每个通道进行Sobel边缘检测
+        R = rgb[:, :, 0]
+        G = rgb[:, :, 1]
+        B = rgb[:, :, 2]
+
+        R_sobel = filters.sobel(R)
+        G_sobel = filters.sobel(G)
+        B_sobel = filters.sobel(B)
+
+        # 将边缘图与原始通道相乘，得到加权边缘图
+        R_edge = R_sobel * R
+        G_edge = G_sobel * G
+        B_edge = B_sobel * B
+
+        # 对加权边缘图计算EME
+        R_eme = self._eme(R_edge)
+        G_eme = self._eme(G_edge)
+        B_eme = self._eme(B_edge)
+
+        # 组合计算UISM
+        lambda_r = 0.299
+        lambda_g = 0.587
+        lambda_b = 0.114
+        uism_value = lambda_r * R_eme + lambda_g * G_eme + lambda_b * B_eme
+        return uism_value
 
     def _calculate_uiconm(self, gray):
         """
@@ -221,7 +238,8 @@ class PSNR_SSIM_UIQM_UCIQE:
         返回:
             float: 计算得到的EME值。
         """
-        channel = channel + 1e-8  # 防止对数计算中的除零
+        # 防止对数计算中的除零
+        channel = channel + 1e-8
         M, N = channel.shape
         num_x = int(np.ceil(M / block_size))
         num_y = int(np.ceil(N / block_size))
@@ -241,11 +259,55 @@ class PSNR_SSIM_UIQM_UCIQE:
 
                 # 防止对数计算中的除零
                 block_min = max(block_min, 1e-8)
-                block_max = max(block_max, 1e-8)
+                block_max = max(block_max, block_min + 1e-8)  # 确保block_max > block_min
 
                 eme_value += w * np.log(block_max / block_min)
 
         return eme_value
+
+    def _asymmetric_trimmed_mean(self, arr, alpha_low, alpha_high):
+        """
+        计算数组的非对称裁剪平均值。
+
+        参数:
+            arr (numpy.ndarray): 输入数组。
+            alpha_low (float): 低端裁剪比例，取值范围[0, 0.5)。
+            alpha_high (float): 高端裁剪比例，取值范围[0, 0.5)。
+
+        返回:
+            float: 裁剪后的平均值。
+        """
+        arr_flat = arr.flatten()
+        arr_sorted = np.sort(arr_flat)
+        N = len(arr_sorted)
+        lower_idx = int(np.floor(N * alpha_low))
+        upper_idx = int(np.ceil(N * (1 - alpha_high)))
+
+        arr_cropped = arr_sorted[lower_idx:upper_idx]
+        mean_value = np.mean(arr_cropped)
+        return mean_value
+
+    def _asymmetric_trimmed_std(self, arr, alpha_low, alpha_high):
+        """
+        计算数组的非对称裁剪标准差。
+
+        参数:
+            arr (numpy.ndarray): 输入数组。
+            alpha_low (float): 低端裁剪比例，取值范围[0, 0.5)。
+            alpha_high (float): 高端裁剪比例，取值范围[0, 0.5)。
+
+        返回:
+            float: 裁剪后的标准差。
+        """
+        arr_flat = arr.flatten()
+        arr_sorted = np.sort(arr_flat)
+        N = len(arr_sorted)
+        lower_idx = int(np.floor(N * alpha_low))
+        upper_idx = int(np.ceil(N * (1 - alpha_high)))
+
+        arr_cropped = arr_sorted[lower_idx:upper_idx]
+        std_value = np.std(arr_cropped)
+        return std_value
 
     def _plipsum(self, i, j, gamma=1026):
         """
@@ -300,7 +362,8 @@ class PSNR_SSIM_UIQM_UCIQE:
         返回:
             float: 计算得到的对数AMBE值。
         """
-        channel = channel * 255.0 + 1e-8  # 转换回[0,255]范围，防止除零
+        # 转换回[0,255]范围，防止除零
+        channel = channel * 255.0 + 1e-8
         M, N = channel.shape
         num_x = int(np.ceil(M / block_size))
         num_y = int(np.ceil(N / block_size))
@@ -319,6 +382,10 @@ class PSNR_SSIM_UIQM_UCIQE:
                 block_min = np.min(block)
                 block_max = np.max(block)
 
+                # 防止除零
+                block_min = max(block_min, 1e-8)
+                block_max = max(block_max, 1e-8)
+
                 top = self._plipsub(block_max, block_min, gamma)
                 bottom = self._plipsum(block_max, block_min, gamma)
                 m = top / (bottom + 1e-8)  # 防止除零
@@ -328,28 +395,35 @@ class PSNR_SSIM_UIQM_UCIQE:
 
         return self._plipmult(w, s, gamma)
 
-    def process_images(self, metrics=['psnr', 'ssim', 'uiqm', 'uciqe'], csv_path="metrics.csv", 
-                       uiqm_coeffs=(0.0282, 0.2953, 3.5753), uciqe_coeffs=(0.4680, 0.2745, 0.2576)):
+    def process_images(self, metrics=['psnr', 'ssim', 'uiqm', 'uciqe'], csv_path="metrics.csv",
+                       uiqm_coeffs=(0.0282, 0.2953, 3.5753), uciqe_coeffs=(0.4680, 0.2745, 0.2576),
+                       target_size=(640, 640)):
         """
         处理图像并计算指定的指标。
 
         参数:
-            metrics (list of str): 要计算的指标列表，默认为所有指标。
+            metrics (list of str): 要计算的指标列表。
             csv_path (str): 保存CSV的相对路径和文件名。
             uiqm_coeffs (tuple): UIQM的系数，默认值为(0.0282, 0.2953, 3.5753)。
             uciqe_coeffs (tuple): UCIQE的系数，默认值为(0.4680, 0.2745, 0.2576)。
+            target_size (tuple of int): 图像缩放的目标尺寸，默认值为(640, 640)。
 
         返回:
             None
         """
-        result_files = [f for f in os.listdir(self.image_path)]
+        # 获取图像文件列表，仅包括常见图像格式
+        result_files = [f for f in os.listdir(self.image_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp'))]
         N = len(result_files)
-        sum_metrics = {metric: 0.0 for metric in metrics}
 
         for img_file in tqdm(result_files, desc="Processing images"):
             # 已处理图像
             corrected_path = os.path.join(self.image_path, img_file)
             corrected = io.imread(corrected_path)
+
+            # 缩放图像，如果指定了target_size
+            if target_size is not None:
+                corrected = resize(corrected, target_size, anti_aliasing=True, preserve_range=True)
+                corrected = corrected.astype(np.uint8)
 
             # 添加 image_path 列，值为相对于保存的 CSV 文件的路径
             result = {
@@ -364,46 +438,51 @@ class PSNR_SSIM_UIQM_UCIQE:
                     print(f"参考图像 {img_file} 不存在，跳过 PSNR 和 SSIM 计算。")
                 else:
                     reference = io.imread(reference_path)
+                    # 缩放参考图像，如果指定了target_size
+                    if target_size is not None:
+                        reference = resize(reference, target_size, anti_aliasing=True, preserve_range=True)
+                        reference = reference.astype(np.uint8)
                     if 'psnr' in metrics:
+                        start_time = time.perf_counter()
                         psnr_value = self.compute_psnr(corrected, reference)
-                        result['psnr'] = psnr_value
-                        sum_metrics['psnr'] += psnr_value
+                        psnr_time = time.perf_counter() - start_time
+                        result['psnr_value'] = psnr_value
+                        result['psnr_time'] = psnr_time
                     if 'ssim' in metrics:
                         try:
+                            start_time = time.perf_counter()
                             ssim_value = self.compute_ssim(corrected, reference)
-                            result['ssim'] = ssim_value
-                            sum_metrics['ssim'] += ssim_value
+                            ssim_time = time.perf_counter() - start_time
+                            result['ssim_value'] = ssim_value
+                            result['ssim_time'] = ssim_time
                         except ValueError as e:
                             print(f"计算 {img_file} 的 SSIM 时出错：{e}")
-                            result['ssim'] = None
+                            result['ssim_value'] = None
+                            result['ssim_time'] = None
             else:
                 if 'psnr' in metrics or 'ssim' in metrics:
                     print("未提供参考路径，无法计算 PSNR 和 SSIM。")
 
             # 计算非参考指标
             if 'uiqm' in metrics:
+                start_time = time.perf_counter()
                 uiqm_value = self.compute_uiqm(corrected, m1=uiqm_coeffs[0], m2=uiqm_coeffs[1], m3=uiqm_coeffs[2])
-                result['uiqm'] = uiqm_value
-                sum_metrics['uiqm'] += uiqm_value
+                uiqm_time = time.perf_counter() - start_time
+                result['uiqm_value'] = uiqm_value
+                result['uiqm_time'] = uiqm_time
             if 'uciqe' in metrics:
+                start_time = time.perf_counter()
                 uciqe_value = self.compute_uciqe(corrected, c1=uciqe_coeffs[0], c2=uciqe_coeffs[1], c3=uciqe_coeffs[2])
-                result['uciqe'] = uciqe_value
-                sum_metrics['uciqe'] += uciqe_value
+                uciqe_time = time.perf_counter() - start_time
+                result['uciqe_value'] = uciqe_value
+                result['uciqe_time'] = uciqe_time
 
             # 保存结果
             self.results.append(result)
-            
-        """
-        # 计算平均值
-        avg_metrics = {metric: sum_metrics[metric] / N for metric in metrics if N > 0}
-        avg_metrics['image_name'] = 'Average'
-        avg_metrics['image_path'] = ""
-        self.results.append(avg_metrics)
-        """
 
         # 将结果保存为CSV文件
         self._save_results_to_csv(metrics, csv_path)
-        
+
     def _save_results_to_csv(self, metrics, csv_path):
         """
         将结果保存到CSV文件。
@@ -416,7 +495,12 @@ class PSNR_SSIM_UIQM_UCIQE:
             None
         """
         output_file = os.path.join(os.path.dirname(__file__), csv_path)
-        fieldnames = ['image_name', 'image_path'] + metrics
+
+        # 根据指标构建字段名
+        fieldnames = ['image_name', 'image_path']
+        for metric in metrics:
+            fieldnames.append(metric + '_value')
+            fieldnames.append(metric + '_time')
 
         with open(output_file, 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -427,10 +511,11 @@ class PSNR_SSIM_UIQM_UCIQE:
                 row = {key: result.get(key, '') for key in fieldnames}
                 writer.writerow(row)
 
+
 if __name__ == '__main__':
     # 定义结果图像和参考图像的文件夹路径
-    image_path = 'enhanced'       # 实际的已处理图像文件夹路径
-    reference_path = 'origin'      # 实际的参考图像文件夹路径
+    image_path = 'enhanced'       # 已处理图像文件夹路径
+    reference_path = 'origin'     # 参考图像文件夹路径
 
     # 创建图像质量评估对象
     psuu = PSNR_SSIM_UIQM_UCIQE(image_path, reference_path)
@@ -442,6 +527,6 @@ if __name__ == '__main__':
     uiqm_coeffs = (0.0282, 0.2953, 3.5753)
     uciqe_coeffs = (0.4680, 0.2745, 0.2576)
 
-    # 处理图像并计算指标
-    psuu.process_images(metrics=metrics_to_compute, csv_path="PSNR_SSIM_UIQM_UCIQE.csv", 
-                       uiqm_coeffs=uiqm_coeffs, uciqe_coeffs=uciqe_coeffs)
+    # 处理图像并计算指标，默认将图像缩放到640×640大小
+    psuu.process_images(metrics=metrics_to_compute, csv_path="PSNR_SSIM_UIQM_UCIQE.csv",
+                        uiqm_coeffs=uiqm_coeffs, uciqe_coeffs=uciqe_coeffs, target_size=(640, 640))
