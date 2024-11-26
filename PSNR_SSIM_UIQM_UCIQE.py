@@ -10,7 +10,7 @@ import numpy as np
 import os
 import csv
 from skimage import io, color, filters
-from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+from skimage.metrics import structural_similarity
 from tqdm import tqdm
 
 
@@ -83,7 +83,7 @@ class PSNR_SSIM_UIQM_UCIQE:
 
             参数:
                 img (numpy.ndarray): 输入图像。
-                p1 (float): UICM的系数，��认值为0.0282。
+                p1 (float): UICM的系数，默认值为0.0282。
                 p2 (float): UISM的系数，默认值为0.2953。
                 p3 (float): UIConM的系数，默认值为3.5753。
 
