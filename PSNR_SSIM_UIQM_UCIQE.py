@@ -120,8 +120,8 @@ class PSNR_SSIM_UIQM_UCIQE:
 
         # 提取L、a、b分量，并归一化
         L = lab[:, :, 0] / 100.0  # L* 范围 [0, 1]
-        a = lab[:, :, 1] / 110.0  # a* 近似范围 [-1, 1]
-        b = lab[:, :, 2] / 110.0  # b* 近似范围 [-1, 1]
+        a = lab[:, :, 1] / 128.0  # a* 近似范围 [-1, 1]
+        b = lab[:, :, 2] / 128.0  # b* 近似范围 [-1, 1]
 
         # 计算色度C = sqrt(a^2 + b^2)
         chroma = np.sqrt(a ** 2 + b ** 2)
@@ -521,7 +521,8 @@ if __name__ == '__main__':
     psuu = PSNR_SSIM_UIQM_UCIQE(image_path, reference_path)
 
     # 指定要计算的指标
-    metrics_to_compute = ['psnr', 'ssim', 'uiqm', 'uciqe']
+    metrics_to_compute = [#'psnr', 'ssim', 
+                          'uiqm', 'uciqe']
 
     # 指定UIQM和UCIQE的系数
     uiqm_coeffs = (0.0282, 0.2953, 3.5753)
